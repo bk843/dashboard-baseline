@@ -4,9 +4,11 @@
  * Every dashboard runs `securityConformance(...)` in its own test folder, so the same
  * security checks run against every client's real app, not just against this package.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { DatabaseSync } from "node:sqlite";
 import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT, type JWTVerifyGetKey } from "jose";
 import type { AuthDeps } from "./auth";
+import { base32Decode, codeForStep, stepAt } from "./mfa/totp";
 
 export const DEV_ORIGIN = "http://localhost:8787";
 export const PROD_ORIGIN = "https://dash.example.com";
@@ -16,6 +18,36 @@ export const ADMIN = "admin@example.com";
 export const VIEWER = "viewer@example.com";
 export const OUTSIDER = "outsider@example.com";
 export const CSRF_SECRET = "test-csrf-secret-0123456789abcdefghijklmnop";
+
+/** Test-only 2FA keys (32 random-looking bytes, base64). */
+export const MFA_ENCRYPTION_KEY = "dGVzdC1tZmEta2V5LTAxMjM0NTY3ODlhYmNkZWZnaGk=";
+export const MFA_SESSION_SECRET = "test-mfa-session-secret-0123456789abcdef";
+
+/** In-memory D1 (real SQLite) for tests. */
+export function makeD1(): D1Database {
+  const db = new DatabaseSync(":memory:");
+  type P = string | number | null;
+  const stmt = (sql: string, params: P[] = []) => ({
+    bind: (...p: unknown[]) => stmt(sql, p.map((v) => (v === undefined ? null : (v as P)))),
+    first: async () => db.prepare(sql).get(...params) ?? null,
+    all: async () => ({ results: db.prepare(sql).all(...params), success: true, meta: {} }),
+    run: async () => {
+      const r = db.prepare(sql).run(...params);
+      return { success: true, results: [], meta: { changes: Number(r.changes) } };
+    },
+  });
+  return { prepare: (sql: string) => stmt(sql) } as unknown as D1Database;
+}
+
+/** Env for MFA_MODE=app (dev sign-in). Pass a shared `db` to simulate several users. */
+export function mfaEnv(overrides: Env = {}, db: D1Database = makeD1(), extra: Env = {}): Env {
+  return devEnv({ MFA_MODE: "app", MFA_ENCRYPTION_KEY, MFA_SESSION_SECRET, MFA_DB: db, ...overrides }, extra);
+}
+
+/** The current authenticator code for a base32 secret (offset in 30-second steps). */
+export function currentCode(secretB32: string, offsetSteps = 0): Promise<string> {
+  return codeForStep(base32Decode(secretB32), stepAt(Date.now()) + offsetSteps);
+}
 
 export function makeLimiter(max = 1000): RateLimit {
   const counts = new Map<string, number>();
@@ -85,6 +117,35 @@ export async function makeAccess() {
 
 export function cookieFrom(r: Response): string {
   return (r.headers.get("set-cookie") ?? "").split(";")[0] ?? "";
+}
+
+/** A tiny browser: keeps cookies and sends the CSRF token on changes. */
+export function browser(app: RequestableApp, env: Env, origin = DEV_ORIGIN) {
+  const jar = new Map<string, string>();
+  const req = async (path: string, init: { method?: string; body?: unknown } = {}) => {
+    const method = init.method ?? (init.body === undefined ? "GET" : "POST");
+    const headers: Record<string, string> = { Cookie: [...jar].map(([k, v]) => `${k}=${v}`).join("; ") };
+    if (method !== "GET") Object.assign(headers, { "Content-Type": "application/json", Origin: origin, "X-CSRF-Token": jar.get("csrf") ?? "" });
+    const r = await app.request(origin + path, { method, headers, body: init.body === undefined ? undefined : JSON.stringify(init.body) }, env);
+    for (const sc of r.headers.getSetCookie()) {
+      const kv = sc.split(";")[0]!;
+      const i = kv.indexOf("=");
+      jar.set(kv.slice(0, i), kv.slice(i + 1));
+    }
+    return r;
+  };
+  return { req, jar, csrf: () => req("/api/csrf") };
+}
+
+/** Signs a dev browser through 2FA enrolment. Returns the browser and the authenticator secret. */
+export async function enrolled(app: RequestableApp, env: Env) {
+  const b = browser(app, env);
+  await b.csrf();
+  const start = await b.req("/api/mfa/enroll/start", { body: {} });
+  const { secret } = (await start.json()) as { secret: string };
+  const r = await b.req("/api/mfa/enroll/confirm", { body: { code: await currentCode(secret) } });
+  if (r.status !== 200) throw new Error(`enrolment failed: ${r.status} ${await r.text()}`);
+  return { b, secret };
 }
 
 interface RequestableApp {
@@ -262,6 +323,120 @@ export function securityConformance(opts: ConformanceOptions) {
         const text = (await r.text()) + JSON.stringify([...r.headers]);
         for (const s of secrets) expect(text.includes(s), `${p} leaked a secret`).toBe(false);
       }
+    });
+  });
+
+  describe("baseline: authenticator-app 2FA (MFA_MODE=app)", () => {
+    const app = opts.createApp({});
+    const env = (o: Env = {}, db?: D1Database) => mfaEnv(o, db, extra());
+    const apiPaths = paths.filter((p) => p.startsWith("/api/"));
+
+    it("refuses to run without its keys or database", async () => {
+      for (const o of [{ MFA_ENCRYPTION_KEY: undefined }, { MFA_SESSION_SECRET: undefined }, { MFA_DB: undefined }, { MFA_ENCRYPTION_KEY: "c2hvcnQta2V5LXNob3J0LWtleS1zaG9ydC1rZXkt" }, { MFA_SESSION_SECRET: MFA_ENCRYPTION_KEY }]) {
+        const r = await app.request(DEV_ORIGIN + "/api/me", undefined, env(o));
+        expect(r.status, JSON.stringify(Object.keys(o))).toBe(503);
+      }
+    });
+    it("2FA endpoints don't exist when Cloudflare Access does 2FA", async () => {
+      expect((await app.request(DEV_ORIGIN + "/api/mfa/status", undefined, dEnv())).status).toBe(404);
+      expect((await app.request(DEV_ORIGIN + "/api/admin/mfa", undefined, dEnv())).status).toBe(404);
+    });
+    it("before the second step: pages show the 2FA screen, every API call is refused", async () => {
+      const e = env();
+      const page = await app.request(DEV_ORIGIN + "/", undefined, e);
+      expect(page.status).toBe(200);
+      expect(await page.text()).toContain("Two-step verification");
+      expect(page.headers.get("content-security-policy")).toContain("script-src 'self'");
+      expect(page.headers.get("cache-control")).toBe("no-store");
+      for (const p of apiPaths) {
+        const r = await app.request(DEV_ORIGIN + p, undefined, e);
+        expect(r.status, p).toBe(401);
+        expect(await r.json()).toEqual({ error: "mfa_required" });
+      }
+      const js = await app.request(DEV_ORIGIN + "/__mfa/mfa.js", undefined, e);
+      expect(js.headers.get("content-type")).toContain("javascript");
+    });
+    it("enrolment: QR code + key, wrong code refused, right code unlocks everything", async () => {
+      const b = browser(app, env());
+      await b.csrf();
+      const start = await b.req("/api/mfa/enroll/start", { body: {} });
+      const { secret, qr } = (await start.json()) as { secret: string; qr: string };
+      expect(qr).toMatch(/^data:image\/svg\+xml;base64,/);
+      expect(secret).toMatch(/^[A-Z2-7]{32}$/);
+      const wrong = (await currentCode(secret)) === "000000" ? "111111" : "000000";
+      expect((await b.req("/api/mfa/enroll/confirm", { body: { code: wrong } })).status).toBe(400);
+      expect((await b.req("/api/mfa/enroll/confirm", { body: { code: await currentCode(secret) } })).status).toBe(200);
+      expect(b.jar.get("mfa")).toBeTruthy();
+      for (const p of paths) expect((await b.req(p)).status, p).toBe(200);
+      expect((await b.req("/api/mfa/enroll/start", { body: {} })).status).toBe(409);
+    });
+    it("2FA cookie is HttpOnly and SameSite=Strict", async () => {
+      const b = browser(app, env());
+      await b.csrf();
+      const { secret } = (await (await b.req("/api/mfa/enroll/start", { body: {} })).json()) as { secret: string };
+      const r = await b.req("/api/mfa/enroll/confirm", { body: { code: await currentCode(secret) } });
+      const sc = r.headers.getSetCookie().find((c) => c.startsWith("mfa=")) ?? "";
+      expect(sc).toMatch(/HttpOnly/i);
+      expect(sc).toMatch(/SameSite=Strict/i);
+    });
+    it("a code can't be used twice", async () => {
+      const db = makeD1();
+      const e = env({}, db);
+      const { secret } = await enrolled(app, e);
+      const b2 = browser(app, e);
+      await b2.csrf();
+      expect((await b2.req("/api/mfa/verify", { body: { code: await currentCode(secret) } })).status).toBe(400);
+      expect((await b2.req("/api/mfa/verify", { body: { code: await currentCode(secret, 1) } })).status).toBe(200);
+      expect((await b2.req("/api/me")).status).toBe(200);
+    });
+    it("five wrong codes lock the account, even against the right code", async () => {
+      const e = env({}, makeD1());
+      const { secret } = await enrolled(app, e);
+      const b = browser(app, e);
+      await b.csrf();
+      const statuses = [];
+      for (let i = 0; i < 5; i++) statuses.push((await b.req("/api/mfa/verify", { body: { code: "000000" } })).status);
+      expect(statuses.slice(0, 4).every((s) => s === 400)).toBe(true);
+      expect(statuses[4]).toBe(429);
+      const r = await b.req("/api/mfa/verify", { body: { code: await currentCode(secret, 1) } });
+      expect(r.status).toBe(429);
+      expect(Number(r.headers.get("retry-after"))).toBeGreaterThan(800);
+    });
+    it("forged, other people's and expired 2FA cookies are refused", async () => {
+      const db = makeD1();
+      const adminEnv = env({}, db);
+      const viewerEnv = env({ ALLOWED_EMAILS: `${VIEWER},${ADMIN}` }, db);
+      const { b } = await enrolled(app, adminEnv);
+      await enrolled(app, viewerEnv);
+      const good = b.jar.get("mfa")!;
+      const forged = browser(app, adminEnv);
+      forged.jar.set("mfa", good.slice(0, -3) + "xyz");
+      expect((await forged.req("/api/me")).status).toBe(401);
+      const stolen = browser(app, viewerEnv);
+      stolen.jar.set("mfa", good);
+      expect((await stolen.req("/api/me")).status).toBe(401);
+      vi.useFakeTimers({ toFake: ["Date"] });
+      try {
+        vi.setSystemTime(Date.now() + 13 * 3600_000);
+        expect((await b.req("/api/me")).status).toBe(401);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+    it("admins see who has 2FA and can reset others (ending their session), not themselves", async () => {
+      const db = makeD1();
+      const adminEnv = env({}, db);
+      const viewerEnv = env({ ALLOWED_EMAILS: `${VIEWER},${ADMIN}` }, db);
+      const { b: admin } = await enrolled(app, adminEnv);
+      const { b: viewer } = await enrolled(app, viewerEnv);
+      const list = (await (await admin.req("/api/admin/mfa")).json()) as { email: string; enrolled: boolean }[];
+      expect(list.filter((u) => u.enrolled).map((u) => u.email).sort()).toEqual([ADMIN, VIEWER]);
+      expect((await viewer.req("/api/admin/mfa")).status).toBe(403);
+      expect((await viewer.req("/api/admin/mfa/reset", { body: { email: ADMIN } })).status).toBe(403);
+      expect((await admin.req("/api/admin/mfa/reset", { body: { email: ADMIN } })).status).toBe(400);
+      expect((await admin.req("/api/admin/mfa/reset", { body: { email: VIEWER } })).status).toBe(200);
+      expect((await viewer.req("/api/me")).status).toBe(401);
+      expect((await (await viewer.req("/api/mfa/status")).json())).toEqual({ enrolled: false });
     });
   });
 }

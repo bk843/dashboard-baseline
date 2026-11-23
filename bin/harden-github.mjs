@@ -111,11 +111,15 @@ console.log(
     `  gh secret set ALLOWED_EMAILS --env production --repo ${repo}         # staff emails, comma-separated\n` +
     `  gh secret set ADMIN_EMAILS --env production --repo ${repo}\n` +
     `  openssl rand -base64 32 | gh secret set CSRF_SECRET --env production --repo ${repo}\n` +
+    `  # Only if 2FA runs in the dashboard (MFA_MODE=app):\n` +
+    `  openssl rand -base64 32 | gh secret set MFA_ENCRYPTION_KEY --env production --repo ${repo}\n` +
+    `  openssl rand -base64 32 | gh secret set MFA_SESSION_SECRET --env production --repo ${repo}\n` +
     `  gh secret set CF_AUDIT_TOKEN --repo ${repo}                          # read-only audit token\n` +
     `  gh variable set CF_ACCOUNT_ID --repo ${repo}\n` +
     `  gh variable set CF_ZONE_ID --repo ${repo}\n` +
     `  gh variable set APP_HOSTNAME --repo ${repo}\n` +
     `  gh variable set WORKER_NAME --repo ${repo}\n` +
+    `  gh variable set MFA_MODE --repo ${repo}                               # "app" or "access"\n` +
     `(each command prompts for the value, so secrets never land in your shell history)`,
 );
 process.exit(fails ? 1 : 0);

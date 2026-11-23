@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { createSecureApp, defineConfig, requireRole, readJson, buildCsp, validateCspAllow, redact, secretString, requireSecret } from "../src/index";
+import { codeForStep, base32Decode, createSecureApp, defineConfig, requireRole, readJson, buildCsp, validateCspAllow, redact, secretString, requireSecret } from "../src/index";
 import { securityConformance, devEnv, DEV_ORIGIN, cookieFrom, VIEWER } from "../src/testing";
 import type { AuthDeps } from "../src/auth";
 
@@ -71,6 +71,13 @@ describe("baseline internals", () => {
     expect(() => createSecureApp({ config, csp: { img: ["*"] }, api: () => {} })).toThrow();
     expect(buildCsp(true, { connect: ["https://api.example.com"] })).toContain("connect-src 'self' https://api.example.com");
     expect(buildCsp(true)).toContain("frame-src 'none'");
+  });
+
+  it("authenticator codes match the RFC 6238 test vectors", async () => {
+    const secret = new TextEncoder().encode("12345678901234567890");
+    const vectors: [number, string][] = [[59, "94287082"], [1111111109, "07081804"], [1111111111, "14050471"], [1234567890, "89005924"], [2000000000, "69279037"]];
+    for (const [t, code] of vectors) expect(await codeForStep(secret, Math.floor(t / 30), 8)).toBe(code);
+    expect(base32Decode("GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ")).toEqual(secret);
   });
 
   it("log redaction masks secrets by key and by shape", () => {

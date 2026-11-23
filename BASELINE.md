@@ -9,8 +9,9 @@ Items marked **(audit)** live in the client's Cloudflare account and are checked
 | Control | Detail | Enforced by |
 |---|---|---|
 | Sign-in in front of everything | Cloudflare Access covers the whole hostname; no public routes exist | Access app **(audit)**; `createSecureApp` has no way to add an unauthenticated route; conformance tests |
-| Two factors | Email one-time PIN + authenticator app (TOTP) | Access MFA settings **(audit)** |
-| Emailed code can't replace the app code | "Use identity provider MFA" (AMR matching) off | **(audit)** fails if on |
+| Two factors | Email one-time PIN + authenticator app (TOTP). Either Cloudflare Access enforces the app step (`MFA_MODE=access`, paid feature) or the dashboard does (`MFA_MODE=app`, any plan) | Access MFA settings **(audit)**, or the kit's 2FA gate + conformance tests |
+| Emailed code can't replace the app code | "Use identity provider MFA" (AMR matching) off (access mode) | **(audit)** fails if on |
+| App-mode 2FA hardening | Nothing reachable before the second step except the 2FA screen; authenticator secrets AES-256-GCM encrypted and bound to each user; codes single-use; 5 wrong codes → 15-min lock, doubling (max 24h); signed HttpOnly session cookie bound to the user's current authenticator; admin reset ends sessions at once; admins can't reset themselves | `mfaGate()`, `MfaStore`; conformance tests (RFC 6238 vectors, replay, lockout, forged/stolen/expired cookies, reset) |
 | Named people only | Allow policy lists individual emails; no Everyone / domain / Bypass rules | **(audit)** |
 | Sessions expire | Sign-in and MFA re-checked at least every 12h | **(audit)** |
 | Second lock in the app | Worker verifies the Access JWT (signature, issuer, audience, expiry) on every request and checks the email against `ALLOWED_EMAILS` | `authenticate()`; conformance tests (forged, expired, wrong-app, wrong-team, outsider tokens) |

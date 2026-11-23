@@ -19,7 +19,7 @@ try {
   check("HTTP redirects to HTTPS", false, String(e));
 }
 
-for (const path of ["/", "/api/me", "/api/csrf", "/index.html", "/assets/", "/some/deep/page"]) {
+for (const path of ["/", "/api/me", "/api/csrf", "/api/mfa/status", "/__mfa/mfa.js", "/index.html", "/assets/", "/some/deep/page"]) {
   const r = await get(base + path);
   const loc = r.headers.get("location") ?? "";
   const blocked = (r.status === 302 && loc.includes(".cloudflareaccess.com")) || r.status === 401 || r.status === 403;

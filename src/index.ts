@@ -10,3 +10,4 @@ export { HttpError } from "./errors";
 export { log, redact } from "./log";
 export * from "./crypto";
 export type { Role, User, BaseBindings, SecureEnv } from "./types";
+export { mfaGate, MfaStore, codeForStep, base32Decode, stepAt } from "./mfa/index";

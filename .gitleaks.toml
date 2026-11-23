@@ -5,5 +5,5 @@ useDefault = true
 
 [allowlist]
 description = "Test fixtures and placeholders"
-regexes = ['''REPLACE_ME''', '''test-csrf-secret-[0-9a-z]+''', '''GENERATE''']
+regexes = ['''REPLACE_ME''', '''test-csrf-secret-[0-9a-z]+''', '''test-mfa-session-secret-[0-9a-z]+''', '''test-mfa-key-[0-9a-z]+''', '''dGVzdC1tZmEta2V5LTAxMjM0NTY3ODlhYmNkZWZnaGk=''', '''c2hvcnQta2V5LXNob3J0LWtleS1zaG9ydC1rZXkt''', '''GENERATE''']
 paths = ['''package-lock\.json''']

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { b64ToBytes } from "./crypto";
 
 /**
  * Config validation. Every request validates config first. If anything required is missing,
@@ -39,6 +40,21 @@ export const baseShape = {
   ADMIN_EMAILS: emailList(0),
   /** HMAC key for CSRF tokens. 32+ random bytes, base64. */
   CSRF_SECRET: secretString(32),
+
+  /**
+   * Where the authenticator-app step happens:
+   *  "access" — Cloudflare Access enforces it (needs a plan with Access independent MFA).
+   *  "app"    — this Worker enforces it (works on any plan; needs MFA_DB + the two keys below).
+   */
+  MFA_MODE: z.enum(["access", "app"]).default("access"),
+  /** AES-256 key for authenticator secrets at rest. 32 random bytes, base64. (MFA_MODE=app) */
+  MFA_ENCRYPTION_KEY: secretString(40).optional(),
+  /** HMAC key for the verified-session cookie. 32+ random bytes, base64. (MFA_MODE=app) */
+  MFA_SESSION_SECRET: secretString(32).optional(),
+  /** How long a verified session lasts before asking for a new code. */
+  MFA_SESSION_HOURS: z.coerce.number().int().min(1).max(24).default(12),
+  /** Name shown in the authenticator app. Defaults to the dashboard's hostname. */
+  MFA_ISSUER: z.string().max(60).optional(),
 };
 
 export interface BaseConfig {
@@ -50,6 +66,19 @@ export interface BaseConfig {
   ALLOWED_EMAILS: string[];
   ADMIN_EMAILS: string[];
   CSRF_SECRET: string;
+  MFA_MODE: "access" | "app";
+  MFA_ENCRYPTION_KEY?: string | undefined;
+  MFA_SESSION_SECRET?: string | undefined;
+  MFA_SESSION_HOURS: number;
+  MFA_ISSUER?: string | undefined;
+}
+
+function isKey32(b64: string): boolean {
+  try {
+    return b64ToBytes(b64).length === 32;
+  } catch {
+    return false;
+  }
 }
 
 function baseRules(c: BaseConfig, ctx: z.RefinementCtx) {
@@ -64,6 +93,12 @@ function baseRules(c: BaseConfig, ctx: z.RefinementCtx) {
     if (c.ACCESS_AUD.length < 32 || !notPlaceholder(c.ACCESS_AUD)) issue("ACCESS_AUD", "must be the Access application AUD tag");
   }
   if (c.AUTH_MODE === "dev" && c.ENVIRONMENT !== "development") issue("AUTH_MODE", "dev auth is only allowed in development");
+  if (c.MFA_MODE === "app") {
+    if (!c.MFA_ENCRYPTION_KEY) issue("MFA_ENCRYPTION_KEY", "required when MFA_MODE=app");
+    else if (!isKey32(c.MFA_ENCRYPTION_KEY)) issue("MFA_ENCRYPTION_KEY", "must be 32 random bytes, base64");
+    if (!c.MFA_SESSION_SECRET) issue("MFA_SESSION_SECRET", "required when MFA_MODE=app");
+    if (c.MFA_ENCRYPTION_KEY && c.MFA_ENCRYPTION_KEY === c.MFA_SESSION_SECRET) issue("MFA_SESSION_SECRET", "must differ from MFA_ENCRYPTION_KEY");
+  }
   for (const a of c.ADMIN_EMAILS) if (!c.ALLOWED_EMAILS.includes(a)) issue("ADMIN_EMAILS", "every admin must also be in ALLOWED_EMAILS");
 }
 
@@ -85,6 +120,7 @@ export const BASE_BINDINGS = ["ASSETS", "RL_API"] as const;
 export function loadConfig<C>(schema: z.ZodType<C>, env: Record<string, unknown>, requiredBindings: readonly string[] = []): C {
   const r = schema.safeParse(env);
   if (!r.success) throw new ConfigError(r.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`));
-  for (const b of [...BASE_BINDINGS, ...requiredBindings]) if (!env[b]) throw new ConfigError([`${b}: binding missing`]);
+  const mfaBindings = (r.data as { MFA_MODE?: string }).MFA_MODE === "app" ? ["MFA_DB"] : [];
+  for (const b of [...BASE_BINDINGS, ...mfaBindings, ...requiredBindings]) if (!env[b]) throw new ConfigError([`${b}: binding missing`]);
   return r.data;
 }

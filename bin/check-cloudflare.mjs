@@ -6,7 +6,8 @@
 //
 // Token permissions (all Read): Account → Access: Apps and Policies, Access: Organizations,
 // Identity Providers, and Groups, Workers Scripts.  Zone → Zone Settings, DNS.
-// Optional: MAX_SESSION_HOURS (default 12).
+// Optional: MAX_SESSION_HOURS (default 12). MFA_MODE=app when the dashboard enforces the
+// authenticator-app step itself (Cloudflare plans without Access independent MFA).
 
 const env = process.env;
 const need = ["CF_AUDIT_TOKEN", "CF_ACCOUNT_ID", "CF_ZONE_ID", "APP_HOSTNAME", "WORKER_NAME"];
@@ -17,6 +18,7 @@ if (missing.length) {
 }
 const { CF_AUDIT_TOKEN: TOKEN, CF_ACCOUNT_ID: ACCOUNT, CF_ZONE_ID: ZONE, APP_HOSTNAME: HOST, WORKER_NAME: WORKER } = env;
 const MAX_HOURS = Number(env.MAX_SESSION_HOURS ?? 12);
+const APP_MFA = (env.MFA_MODE || "access") === "app";
 
 const results = [];
 const pass = (name, info = "") => results.push({ s: "✓", name, info });
@@ -75,6 +77,10 @@ await safe("DNSSEC readable", async () => {
 let org = {};
 await safe("Access organization readable", async () => {
   org = await api(`/accounts/${ACCOUNT}/access/organizations`);
+  if (APP_MFA) {
+    pass("Authenticator-app step enforced", "by the dashboard itself (MFA_MODE=app)");
+    return;
+  }
   const mfa = org.mfa_config ?? {};
   ok((mfa.allowed_authenticators ?? []).includes("totp"), "Authenticator-app MFA allowed", (mfa.allowed_authenticators ?? []).join(", "), "totp not in allowed_authenticators — Zero Trust → Access settings → MFA");
   ok(mfa.amr_matching_enabled !== true, "Identity-provider MFA can't stand in for the app code", "AMR matching off",
@@ -108,7 +114,9 @@ await safe("Access applications readable", async () => {
   for (const a of matching) {
     const label = `[${a.name}]`;
     const mfa = a.mfa_config;
-    if (mfa?.mfa_disabled === true) fail(`${label} MFA not disabled for this app`, "MFA is disabled for this app");
+    if (APP_MFA) {
+      /* the dashboard enforces the second step */
+    } else if (mfa?.mfa_disabled === true) fail(`${label} MFA not disabled for this app`, "MFA is disabled for this app");
     else if (mfa && mfa.mfa_disabled === false) pass(`${label} app requires MFA`);
     else ok(org.mfa_required_for_all_apps === true, `${label} app requires MFA`, "via account-wide setting",
       "MFA isn't required: set the app's MFA tab to Custom (authenticator app), or turn on \"Apply global MFA settings by default\"");
@@ -139,7 +147,7 @@ await safe("Access applications readable", async () => {
         warn(`${pl} is a service-token policy`, "only OK for machine access you set up on purpose");
         continue;
       }
-      if (p.mfa_config?.mfa_disabled === true) fail(`${pl} doesn't skip MFA`, "MFA disabled on this policy");
+      if (!APP_MFA && p.mfa_config?.mfa_disabled === true) fail(`${pl} doesn't skip MFA`, "MFA disabled on this policy");
       const kinds = (p.include ?? []).flatMap((r) => Object.keys(r));
       const loose = kinds.filter((k) => !["email", "email_list"].includes(k));
       ok(loose.length === 0, `${pl} lists named people only`, `${kinds.length} entr${kinds.length === 1 ? "y" : "ies"}`,

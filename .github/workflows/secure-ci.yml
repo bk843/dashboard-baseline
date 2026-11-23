@@ -28,6 +28,9 @@ on:
       zone-id:
         type: string
         default: ""
+      mfa-mode:
+        type: string
+        default: "access"
       node-version:
         type: string
         default: "24"
@@ -87,6 +90,7 @@ jobs:
           CF_ZONE_ID: ${{ inputs.zone-id }}
           APP_HOSTNAME: ${{ inputs.app-hostname }}
           WORKER_NAME: ${{ inputs.worker-name }}
+          MFA_MODE: ${{ inputs.mfa-mode }}
         run: npx dashboard-security-kit check-cloudflare
 
   deploy:
@@ -117,17 +121,20 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ inputs.account-id }}
         run: npx wrangler deploy --env production
-      - name: Sync Worker secrets (staff list, CSRF key) from the production environment
+      - name: Sync Worker secrets (staff list, CSRF key, 2FA keys) from the production environment
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ inputs.account-id }}
           ALLOWED_EMAILS: ${{ secrets.ALLOWED_EMAILS }}
           ADMIN_EMAILS: ${{ secrets.ADMIN_EMAILS }}
           CSRF_SECRET: ${{ secrets.CSRF_SECRET }}
+          MFA_ENCRYPTION_KEY: ${{ secrets.MFA_ENCRYPTION_KEY }}
+          MFA_SESSION_SECRET: ${{ secrets.MFA_SESSION_SECRET }}
+          MFA_MODE: ${{ inputs.mfa-mode }}
         run: |
           umask 077
           f="$RUNNER_TEMP/worker-secrets.json"
-          node -e 'const k=["ALLOWED_EMAILS","ADMIN_EMAILS","CSRF_SECRET"];const m=k.filter(x=>!process.env[x]&&x!=="ADMIN_EMAILS");if(m.length){console.error("Missing production secrets: "+m.join(", "));process.exit(1)}require("fs").writeFileSync(process.argv[1],JSON.stringify(Object.fromEntries(k.map(x=>[x,process.env[x]??""]))))' "$f"
+          node -e 'const app=process.env.MFA_MODE==="app";const k=["ALLOWED_EMAILS","ADMIN_EMAILS","CSRF_SECRET",...(app?["MFA_ENCRYPTION_KEY","MFA_SESSION_SECRET"]:[])];const m=k.filter(x=>!process.env[x]&&x!=="ADMIN_EMAILS");if(m.length){console.error("Missing production secrets: "+m.join(", "));process.exit(1)}require("fs").writeFileSync(process.argv[1],JSON.stringify(Object.fromEntries(k.map(x=>[x,process.env[x]??""]))))' "$f"
           npx wrangler secret bulk "$f" --env production
           rm -f "$f"
       - name: Check the live site from the outside

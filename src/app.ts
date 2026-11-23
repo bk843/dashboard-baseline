@@ -8,6 +8,7 @@ import { securityHeaders, type CspAllow } from "./headers";
 import { authenticate, type AuthDeps } from "./auth";
 import { csrfProtect, issueCsrfToken, sameOriginOnly } from "./csrf";
 import { jsonBodiesOnly, rateLimit } from "./limits";
+import { mfaGate, registerMfaAssets, registerMfaRoutes } from "./mfa/index";
 
 export interface SecureAppOptions<C extends BaseConfig, B extends BaseBindings> {
   /** Config schema from defineConfig(). */
@@ -28,7 +29,8 @@ export interface SecureAppOptions<C extends BaseConfig, B extends BaseBindings> 
  * Builds a dashboard Worker with the full security baseline already in place.
  * The order is fixed here on purpose, so no dashboard can put a route in front of auth:
  *
- *   security headers → config check → sign-in check → (API only) same-origin, JSON-only,
+ *   security headers → config check → sign-in check → 2FA check (MFA_MODE=app) →
+ *   (API only) same-origin, JSON-only,
  *   rate limit, CSRF → your routes → 404 → static UI → safe error handler
  *
  * There is deliberately no way to add an unauthenticated route. Every page and API call
@@ -48,12 +50,16 @@ export function createSecureApp<C extends BaseConfig, B extends BaseBindings = B
   });
 
   app.use("*", authenticate<E>(opts.deps));
+  // MFA_MODE=app: nothing past this point until the authenticator-app step is done.
+  app.use("*", mfaGate<E>());
+  registerMfaAssets(app);
 
   app.use("/api/*", sameOriginOnly<E>(), jsonBodiesOnly<E>(opts.bodyLimits), rateLimit<E>("RL_API", "api"), csrfProtect<E>());
 
   const api = new Hono<E>();
   api.get("/me", (c) => c.json(c.get("user")));
   api.get("/csrf", async (c) => c.json({ token: await issueCsrfToken(c) }));
+  registerMfaRoutes(api);
   opts.api(api);
   app.route("/api", api);
   app.all("/api/*", () => {
