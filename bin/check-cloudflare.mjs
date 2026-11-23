@@ -2,7 +2,7 @@
 // It changes nothing. Settings live in the client's account, so this proves they're still right.
 //
 //   CF_AUDIT_TOKEN=…  CF_ACCOUNT_ID=…  CF_ZONE_ID=…  APP_HOSTNAME=dash.client.com  WORKER_NAME=client-dashboard \
-//     dashboard-baseline check-cloudflare
+//     dashboard-security-kit check-cloudflare
 //
 // Token permissions (all Read): Account → Access: Apps and Policies, Access: Organizations,
 // Identity Providers, and Groups, Workers Scripts.  Zone → Zone Settings, DNS.

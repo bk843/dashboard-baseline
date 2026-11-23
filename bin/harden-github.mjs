@@ -1,5 +1,5 @@
 // Applies the baseline GitHub security settings to a dashboard repo. Safe to re-run.
-//   dashboard-baseline harden-github <owner/repo> [--strict]
+//   dashboard-security-kit harden-github <owner/repo> [--strict]
 // Needs the GitHub CLI, signed in as the repo owner:  brew install gh && gh auth login
 // --strict also requires a pull request + passing checks before anything lands on main.
 // Some settings need a paid GitHub plan on PRIVATE repos; the script says which ones were skipped.
@@ -8,7 +8,7 @@ import { spawnSync } from "node:child_process";
 const repo = process.argv[2];
 const strict = process.argv.includes("--strict");
 if (!repo || !/^[\w.-]+\/[\w.-]+$/.test(repo)) {
-  console.error("usage: dashboard-baseline harden-github <owner/repo> [--strict]");
+  console.error("usage: dashboard-security-kit harden-github <owner/repo> [--strict]");
   process.exit(1);
 }
 if (spawnSync("gh", ["--version"]).status !== 0) {

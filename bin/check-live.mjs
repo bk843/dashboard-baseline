@@ -1,9 +1,9 @@
 // Checks a deployed dashboard from the outside, as a stranger would see it.
-//   dashboard-baseline check-live https://dash.client.com [https://<worker>.<account>.workers.dev]
+//   dashboard-security-kit check-live https://dash.client.com [https://<worker>.<account>.workers.dev]
 // Run without being signed in. Every check should show ✓.
 const base = process.argv[2]?.replace(/\/$/, "");
 if (!base || !base.startsWith("https://")) {
-  console.error("usage: dashboard-baseline check-live https://your-dashboard-domain [workers.dev URL]");
+  console.error("usage: dashboard-security-kit check-live https://your-dashboard-domain [workers.dev URL]");
   process.exit(1);
 }
 const results = [];

@@ -2,7 +2,7 @@
 
 Every public-facing client dashboard meets all of this. Column 3 is what makes it automatic.
 Items marked **(audit)** live in the client's Cloudflare account and are checked by
-`dashboard-baseline check-cloudflare` before every deploy and weekly.
+`dashboard-security-kit check-cloudflare` before every deploy and weekly.
 
 ## 1. Who can get in
 

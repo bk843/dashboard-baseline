@@ -1,4 +1,4 @@
-# dashboard-baseline
+# dashboard-security-kit
 
 The shared security layer for every client dashboard on Cloudflare Workers. Dashboards install
 it from GitHub at a pinned version, so a fix here reaches every dashboard with one version bump.
@@ -13,7 +13,7 @@ it from GitHub at a pinned version, so a fix here reaches every dashboard with o
 | `src/testing.ts` | `securityConformance()`: the shared security test suite every dashboard runs against its own app |
 | `eslint/` | `securityLint()`: lint rules (no raw HTML/SQL, no keys in URLs, no server code in the browser) |
 | `vite/` | `secureVite()`: safe build settings (no source maps, nothing inlined, `PUBLIC_` env only) |
-| `bin/` | CLI `dashboard-baseline …`: `setup-dev`, `check-bundle`, `check-live`, `check-cloudflare`, `harden-github` |
+| `bin/` | CLI `dashboard-security-kit …`: `setup-dev`, `check-bundle`, `check-live`, `check-cloudflare`, `harden-github` |
 | `.github/workflows/secure-ci.yml` | The reusable pipeline every dashboard calls: verify → secret scan → Cloudflare audit → deploy → live check |
 
 ## Working on it
@@ -32,7 +32,7 @@ npm run verify     # typecheck + lint + tests
    ```bash
    git tag v1.1.0 && git push origin main v1.1.0
    ```
-4. In each dashboard: `npm install github:<you>/dashboard-baseline#v1.1.0`, bump the `@v…` in its
+4. In each dashboard: `npm install github:<you>/dashboard-security-kit#v1.1.0`, bump the `@v…` in its
    `ci.yml`, run `npm run verify`, push.
 
 ## Public or private repo?

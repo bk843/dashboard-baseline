@@ -1,5 +1,5 @@
 // Shared Vite settings for the browser bundle. A dashboard's vite.config.ts:
-//   import { secureVite } from "dashboard-baseline/vite";
+//   import { secureVite } from "dashboard-security-kit/vite";
 //   export default defineConfig(secureVite({ plugins: [react()] }));
 
 /**

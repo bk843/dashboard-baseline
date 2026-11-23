@@ -1,5 +1,5 @@
 # Reusable pipeline shared by every dashboard. A dashboard's own workflow calls it:
-#   uses: <owner>/dashboard-baseline/.github/workflows/secure-ci.yml@v1.0.0
+#   uses: <owner>/dashboard-security-kit/.github/workflows/secure-ci.yml@v1.0.0
 #
 #   verify  — typecheck, lint, security tests, build, bundle scan, dependency audit
 #   secrets — gitleaks over the full git history
@@ -87,7 +87,7 @@ jobs:
           CF_ZONE_ID: ${{ inputs.zone-id }}
           APP_HOSTNAME: ${{ inputs.app-hostname }}
           WORKER_NAME: ${{ inputs.worker-name }}
-        run: npx dashboard-baseline check-cloudflare
+        run: npx dashboard-security-kit check-cloudflare
 
   deploy:
     name: deploy
@@ -111,7 +111,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build:web
-      - run: npx dashboard-baseline check-bundle
+      - run: npx dashboard-security-kit check-bundle
       - name: Deploy to the client's Cloudflare account
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -131,4 +131,4 @@ jobs:
           npx wrangler secret bulk "$f" --env production
           rm -f "$f"
       - name: Check the live site from the outside
-        run: npx dashboard-baseline check-live "https://${{ inputs.app-hostname }}"
+        run: npx dashboard-security-kit check-live "https://${{ inputs.app-hostname }}"

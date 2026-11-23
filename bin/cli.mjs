@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// dashboard-baseline <command>   — security checks shared by every dashboard.
+// dashboard-security-kit <command>   — security checks shared by every dashboard.
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
@@ -13,7 +13,7 @@ const COMMANDS = {
 
 const [cmd, ...args] = process.argv.slice(2);
 if (!cmd || !COMMANDS[cmd]) {
-  console.log("Usage: dashboard-baseline <command>\n");
+  console.log("Usage: dashboard-security-kit <command>\n");
   for (const [k, [, d]] of Object.entries(COMMANDS)) console.log(`  ${k.padEnd(18)} ${d}`);
   process.exit(cmd ? 1 : 0);
 }

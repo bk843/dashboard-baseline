@@ -1,5 +1,5 @@
 // Shared security lint rules. A dashboard's eslint.config.js spreads these in:
-//   import { securityLint } from "dashboard-baseline/eslint";
+//   import { securityLint } from "dashboard-security-kit/eslint";
 //   export default tseslint.config(...tseslint.configs.recommended, ...securityLint());
 
 const SECRET_NAME = "/^[A-Z][A-Z0-9_]*_(API_KEY|SECRET|TOKEN|PASSWORD|PRIVATE_KEY)$/";
@@ -53,7 +53,7 @@ export function securityLint(o = {}) {
           "error",
           {
             patterns: [
-              { group: ["**/worker/**", "dashboard-baseline", "dashboard-baseline/*"], message: "Browser code must not import server code." },
+              { group: ["**/worker/**", "dashboard-security-kit", "dashboard-security-kit/*"], message: "Browser code must not import server code." },
             ],
           },
         ],
