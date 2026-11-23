@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.1.1 — 2026-11-23
+- **Secret scan works on organization accounts.** The pipeline now runs the gitleaks CLI
+  (v8.30.1, checksum verified) instead of the gitleaks GitHub Action, which needs a paid license
+  on organization accounts. Same scan, same `.gitleaks.toml`, full history.
+- Dashboards should pin the kit by commit ID (package and workflow), not by tag.
+
 ## v1.1.0 — 2026-11-23
 - **Authenticator-app 2FA built into the kit** (`MFA_MODE=app`) for Cloudflare plans where Access
   can't enforce it. Cloudflare Access still sends the email code; the dashboard then asks for the
