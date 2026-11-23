@@ -1,0 +1,9 @@
+title = "dashboard-baseline gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Test fixtures and placeholders"
+regexes = ['''REPLACE_ME''', '''test-csrf-secret-[0-9a-z]+''', '''GENERATE''']
+paths = ['''package-lock\.json''']

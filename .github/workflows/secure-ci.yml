@@ -1,0 +1,134 @@
+# Reusable pipeline shared by every dashboard. A dashboard's own workflow calls it:
+#   uses: <owner>/dashboard-baseline/.github/workflows/secure-ci.yml@v1.0.0
+#
+#   verify  — typecheck, lint, security tests, build, bundle scan, dependency audit
+#   secrets — gitleaks over the full git history
+#   audit   — read-only check of the client's Cloudflare settings (Access, MFA, TLS, side doors)
+#   deploy  — only after all of the above pass, only from main, in the "production" environment
+name: Dashboard secure pipeline
+
+on:
+  workflow_call:
+    inputs:
+      deploy:
+        type: boolean
+        default: false
+      audit:
+        type: boolean
+        default: false
+      app-hostname:
+        type: string
+        default: ""
+      worker-name:
+        type: string
+        default: ""
+      account-id:
+        type: string
+        default: ""
+      zone-id:
+        type: string
+        default: ""
+      node-version:
+        type: string
+        default: "24"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: npm
+      - run: npm ci
+      - run: npm run verify
+      - name: Audit all dependencies (report only)
+        run: npm audit || true
+
+  secrets:
+    name: secrets
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  audit:
+    name: cloudflare-audit
+    if: inputs.audit || inputs.deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: npm
+      - run: npm ci
+      - name: Check Cloudflare account settings (read-only)
+        env:
+          CF_AUDIT_TOKEN: ${{ secrets.CF_AUDIT_TOKEN }}
+          CF_ACCOUNT_ID: ${{ inputs.account-id }}
+          CF_ZONE_ID: ${{ inputs.zone-id }}
+          APP_HOSTNAME: ${{ inputs.app-hostname }}
+          WORKER_NAME: ${{ inputs.worker-name }}
+        run: npx dashboard-baseline check-cloudflare
+
+  deploy:
+    name: deploy
+    if: inputs.deploy && github.ref == 'refs/heads/main'
+    needs: [verify, secrets, audit]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: production
+      url: https://${{ inputs.app-hostname }}
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: npm
+      - run: npm ci
+      - run: npm run build:web
+      - run: npx dashboard-baseline check-bundle
+      - name: Deploy to the client's Cloudflare account
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ inputs.account-id }}
+        run: npx wrangler deploy --env production
+      - name: Sync Worker secrets (staff list, CSRF key) from the production environment
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ inputs.account-id }}
+          ALLOWED_EMAILS: ${{ secrets.ALLOWED_EMAILS }}
+          ADMIN_EMAILS: ${{ secrets.ADMIN_EMAILS }}
+          CSRF_SECRET: ${{ secrets.CSRF_SECRET }}
+        run: |
+          umask 077
+          f="$RUNNER_TEMP/worker-secrets.json"
+          node -e 'const k=["ALLOWED_EMAILS","ADMIN_EMAILS","CSRF_SECRET"];const m=k.filter(x=>!process.env[x]&&x!=="ADMIN_EMAILS");if(m.length){console.error("Missing production secrets: "+m.join(", "));process.exit(1)}require("fs").writeFileSync(process.argv[1],JSON.stringify(Object.fromEntries(k.map(x=>[x,process.env[x]??""]))))' "$f"
+          npx wrangler secret bulk "$f" --env production
+          rm -f "$f"
+      - name: Check the live site from the outside
+        run: npx dashboard-baseline check-live "https://${{ inputs.app-hostname }}"

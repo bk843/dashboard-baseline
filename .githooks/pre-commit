@@ -1,0 +1,10 @@
+#!/bin/sh
+# Blocks commits that contain secrets. Installed by `npm install` (prepare script).
+if ! command -v gitleaks >/dev/null 2>&1; then
+  echo "pre-commit: gitleaks is not installed. Run: brew install gitleaks" >&2
+  exit 1
+fi
+gitleaks git --pre-commit --staged --redact --no-banner -v || {
+  echo "pre-commit: gitleaks found a possible secret. Commit blocked." >&2
+  exit 1
+}
