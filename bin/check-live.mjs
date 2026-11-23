@@ -36,7 +36,10 @@ check("No stack traces in error responses", !/at\s+\S+\s+\(|Error:|stack|node_mo
 
 const root = await get(base + "/");
 const hsts = root.headers.get("strict-transport-security") ?? "";
-check("HSTS on (zone or app)", /max-age=\d{7,}/.test(hsts), hsts || "missing — turn on HSTS in Cloudflare SSL/TLS → Edge Certificates");
+// Whole top-level domains that browsers ship as HTTPS-only (HSTS preload list), e.g. every *.workers.dev.
+const preloadedTld = /\.(dev|app|page)$/i.exec(new URL(base).hostname)?.[1];
+if (!/max-age=\d{7,}/.test(hsts) && preloadedTld) check("HSTS on (zone, app, or domain)", true, `.${preloadedTld} is HTTPS-only in all major browsers (HSTS preload)`);
+else check("HSTS on (zone or app)", /max-age=\d{7,}/.test(hsts), hsts || "missing — turn on HSTS in Cloudflare SSL/TLS → Edge Certificates");
 
 const cors = await get(base + "/api/me", { method: "OPTIONS", headers: { Origin: "https://evil.example", "Access-Control-Request-Method": "GET" } });
 check("No CORS for other origins", !cors.headers.get("access-control-allow-origin"), cors.headers.get("access-control-allow-origin") ?? "none");

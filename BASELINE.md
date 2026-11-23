@@ -16,7 +16,7 @@ Items marked **(audit)** live in the client's Cloudflare account and are checked
 | Sessions expire | Sign-in and MFA re-checked at least every 12h | **(audit)** |
 | Second lock in the app | Worker verifies the Access JWT (signature, issuer, audience, expiry) on every request and checks the email against `ALLOWED_EMAILS` | `authenticate()`; conformance tests (forged, expired, wrong-app, wrong-team, outsider tokens) |
 | Roles | `viewer` by default, `admin` from `ADMIN_EMAILS`; `requireRole("admin")` per route | `authenticate()`, `requireRole()` |
-| No side doors | `workers.dev` and preview URLs off | `wrangler.jsonc`; **(audit)**; `check-live` |
+| No side doors | Exactly one address, covered by Access. Custom domain: `workers.dev` and preview URLs off. No custom domain: the `workers.dev` address is the one address (Access on it), preview URLs off | `wrangler.jsonc`; **(audit)**, which detects workers.dev mode from the hostname; `check-live` |
 
 ## 2. What the app does on every request
 

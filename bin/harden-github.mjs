@@ -116,7 +116,7 @@ console.log(
     `  openssl rand -base64 32 | gh secret set MFA_SESSION_SECRET --env production --repo ${repo}\n` +
     `  gh secret set CF_AUDIT_TOKEN --repo ${repo}                          # read-only audit token\n` +
     `  gh variable set CF_ACCOUNT_ID --repo ${repo}\n` +
-    `  gh variable set CF_ZONE_ID --repo ${repo}\n` +
+    `  gh variable set CF_ZONE_ID --repo ${repo}                            # skip if the dashboard is on workers.dev\n` +
     `  gh variable set APP_HOSTNAME --repo ${repo}\n` +
     `  gh variable set WORKER_NAME --repo ${repo}\n` +
     `  gh variable set MFA_MODE --repo ${repo}                               # "app" or "access"\n` +

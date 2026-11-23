@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.1.2 — 2026-11-23
+- **Dashboards without a custom domain (workers.dev).** `check-cloudflare` switches to workers.dev
+  mode when `APP_HOSTNAME` ends in `.workers.dev`: no `CF_ZONE_ID` needed, domain TLS/DNSSEC
+  checks skipped (Cloudflare runs TLS there), the workers.dev address must be ON and covered by
+  Access, preview URLs must stay OFF. Custom-domain dashboards are checked exactly as before.
+- `check-live`: HSTS passes on domains whose whole TLD is HTTPS-only in browsers (`.dev`, `.app`,
+  `.page`, e.g. every `*.workers.dev`), where Access answers before the app can send the header.
+
 ## v1.1.1 — 2026-11-23
 - **Secret scan works on organization accounts.** The pipeline now runs the gitleaks CLI
   (v8.30.1, checksum verified) instead of the gitleaks GitHub Action, which needs a paid license

@@ -8,9 +8,15 @@
 // Identity Providers, and Groups, Workers Scripts.  Zone → Zone Settings, DNS.
 // Optional: MAX_SESSION_HOURS (default 12). MFA_MODE=app when the dashboard enforces the
 // authenticator-app step itself (Cloudflare plans without Access independent MFA).
+//
+// workers.dev mode (automatic when APP_HOSTNAME ends in .workers.dev): for clients with no custom
+// domain. CF_ZONE_ID isn't needed and the domain checks are skipped (Cloudflare runs TLS for
+// workers.dev). The workers.dev address must be ON (it's the only way in), Access must cover it,
+// and preview URLs must stay OFF (they'd be addresses Access doesn't cover).
 
 const env = process.env;
-const need = ["CF_AUDIT_TOKEN", "CF_ACCOUNT_ID", "CF_ZONE_ID", "APP_HOSTNAME", "WORKER_NAME"];
+const WORKERS_DEV = /\.workers\.dev$/i.test(env.APP_HOSTNAME ?? "");
+const need = ["CF_AUDIT_TOKEN", "CF_ACCOUNT_ID", ...(WORKERS_DEV ? [] : ["CF_ZONE_ID"]), "APP_HOSTNAME", "WORKER_NAME"];
 const missing = need.filter((k) => !env[k]);
 if (missing.length) {
   console.error(`Missing: ${missing.join(", ")}\nSee the comment at the top of check-cloudflare.mjs for what each one is.`);
@@ -52,7 +58,8 @@ function hours(d) {
 }
 
 // ---------- Zone: TLS / HTTPS ----------
-await safe("Zone settings readable", async () => {
+if (WORKERS_DEV) pass("Domain TLS settings", "managed by Cloudflare (workers.dev, HTTPS-only); no client domain to check");
+else await safe("Zone settings readable", async () => {
   const list = await api(`/zones/${ZONE}/settings`);
   const s = Object.fromEntries(list.map((x) => [x.id, x.value]));
   ok(s.ssl === "strict", "SSL mode is Full (strict)", s.ssl, `is "${s.ssl}" — set SSL/TLS → Overview → Full (strict)`);
@@ -67,7 +74,7 @@ await safe("Zone settings readable", async () => {
   if (s.browser_check !== "on") warn("Browser integrity check", String(s.browser_check));
 });
 
-await safe("DNSSEC readable", async () => {
+if (!WORKERS_DEV) await safe("DNSSEC readable", async () => {
   const d = await api(`/zones/${ZONE}/dnssec`);
   if (d.status === "active") pass("DNSSEC active");
   else warn("DNSSEC", `${d.status} — DNS → Settings → enable DNSSEC (protects the domain from spoofing)`);
@@ -161,8 +168,9 @@ await safe("Access applications readable", async () => {
 // ---------- Worker: no public side doors ----------
 await safe("Worker readable", async () => {
   const sub = await api(`/accounts/${ACCOUNT}/workers/scripts/${WORKER}/subdomain`);
-  ok(sub.enabled === false, "workers.dev URL disabled", "", "enabled — anyone could reach the Worker outside Access");
-  ok(sub.previews_enabled !== true, "Preview URLs disabled", "", "enabled — preview URLs bypass the custom domain");
+  if (WORKERS_DEV) ok(sub.enabled === true, "workers.dev URL is the dashboard's address", "on (covered by the Access app above)", "off — the dashboard has no address");
+  else ok(sub.enabled === false, "workers.dev URL disabled", "", "enabled — anyone could reach the Worker outside Access");
+  ok(sub.previews_enabled !== true, "Preview URLs disabled", "", "enabled — preview URLs are extra addresses Access doesn't cover");
 });
 
 // ---------- Report ----------
